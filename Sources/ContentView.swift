@@ -45,114 +45,142 @@ struct ContentView: View {
     }
 
     private var topBar: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .center, spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Project Launcher")
-                        .font(.system(size: 23, weight: .bold, design: .rounded))
-                        .foregroundStyle(Color(hex: "#F7F9FC"))
+        PanelCard {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .center, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Project Launcher")
+                            .font(.system(size: 23, weight: .bold, design: .rounded))
+                            .foregroundStyle(Color(hex: "#F7F9FC"))
 
-                    Text("Last launch \(store.lastLaunchDescription)")
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
-                        .foregroundStyle(Color(hex: "#8E99AB"))
-                }
-
-                Spacer(minLength: 8)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Default")
-                        .font(.system(size: 10, weight: .semibold, design: .rounded))
-                        .foregroundStyle(Color(hex: "#8E99AB"))
-
-                    Picker("Default", selection: $store.defaultLaunchTarget) {
-                        ForEach(LaunchTarget.defaultChoices) { target in
-                            Text(target.displayName).tag(target)
-                        }
+                        Text("Last launch \(store.lastLaunchDescription)")
+                            .font(.system(size: 11, weight: .medium, design: .rounded))
+                            .foregroundStyle(Color(hex: "#8E99AB"))
                     }
-                    .pickerStyle(.menu)
-                    .frame(width: 150)
-                    .tint(Color(hex: "#EEF2FF"))
+                    .frame(width: 190, alignment: .leading)
+
+                    Spacer(minLength: 0)
+
+                    Button(action: store.launchSelected) {
+                        Text(store.launchButtonTitle)
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                            .frame(width: 208)
+                            .padding(.vertical, 6)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color(hex: "#2E76FF"))
+                    .disabled(store.selectedCount == 0)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Fallback Open With")
+                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            .foregroundStyle(Color(hex: "#8E99AB"))
+
+                        Picker("Fallback Open With", selection: $store.defaultLaunchTarget) {
+                            ForEach(LaunchTarget.defaultChoices) { target in
+                                Text(target.displayName).tag(target)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .frame(width: 118)
+                        .tint(Color(hex: "#EEF2FF"))
+                    }
+                    .frame(width: 136, alignment: .trailing)
                 }
 
-                Button(action: store.launchSelected) {
-                    Text(store.launchButtonTitle)
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
-                        .frame(minWidth: 98)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(Color(hex: "#2E76FF"))
-                .disabled(store.selectedCount == 0)
+                Text(store.summaryText)
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(Color(hex: "#A9B3C4"))
+                    .frame(maxWidth: .infinity, alignment: .center)
             }
-
-            Text(store.summaryText)
-                .font(.system(size: 11, weight: .medium, design: .rounded))
-                .foregroundStyle(Color(hex: "#A9B3C4"))
         }
-        .padding(14)
-        .background(panelBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(panelStroke)
     }
 
     private var presetSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                TextField("Preset name", text: $store.presetDraft)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                    .background(Color(hex: "#121925"))
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .stroke(Color.white.opacity(0.06), lineWidth: 1)
+        PanelCard {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .center) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Sets")
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .foregroundStyle(Color(hex: "#EEF3FA"))
+
+                        Text("Current Set updates live. Last Launch updates after you launch.")
+                            .font(.system(size: 10, weight: .medium, design: .rounded))
+                            .foregroundStyle(Color(hex: "#7F8A9A"))
+                    }
+
+                    Spacer(minLength: 8)
+
+                    Button("Reset Starter", action: store.resetToStarterList)
+                        .buttonStyle(.bordered)
+                        .tint(Color(hex: "#7B8798"))
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                }
+
+                HStack(spacing: 10) {
+                    BuiltInSetCard(
+                        title: "Current Set",
+                        subtitle: store.currentSetSummary,
+                        badge: "Live",
+                        actionTitle: nil as String?,
+                        action: nil as (() -> Void)?
                     )
 
-                Button("Save Preset", action: store.saveCurrentPreset)
-                    .buttonStyle(.bordered)
-                    .tint(Color(hex: "#7B8798"))
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-
-                Button("Reset Default", action: store.resetToDefaultPreset)
-                    .buttonStyle(.bordered)
-                    .tint(Color(hex: "#7B8798"))
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-            }
-
-            FlowLayout(spacing: 8) {
-                PresetChip(title: "Default") {
-                    store.resetToDefaultPreset()
+                    BuiltInSetCard(
+                        title: "Last Launch",
+                        subtitle: store.lastLaunchSummary,
+                        badge: store.hasLastLaunchPreset ? "Saved" : "Empty",
+                        actionTitle: store.hasLastLaunchPreset ? "Load" : nil,
+                        action: store.hasLastLaunchPreset ? { store.applyLastLaunchPreset() } : nil
+                    )
                 }
 
-                if store.hasLastLaunchPreset {
-                    PresetChip(title: "Last Launch") {
-                        store.applyLastLaunchPreset()
-                    }
+                HStack(spacing: 8) {
+                    TextField("Preset name", text: $store.presetDraft)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(Color(hex: "#121925"))
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .stroke(Color.white.opacity(0.06), lineWidth: 1)
+                        )
+
+                    Button("Save Current", action: store.saveCurrentPreset)
+                        .buttonStyle(.bordered)
+                        .tint(Color(hex: "#7B8798"))
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
                 }
 
-                ForEach(store.presets) { preset in
-                    HStack(spacing: 6) {
-                        PresetChip(title: preset.name) {
-                            store.applyPreset(preset)
-                        }
+                if !store.presets.isEmpty {
+                    Text("Saved Presets")
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .foregroundStyle(Color(hex: "#7F8A9A"))
 
-                        Button {
-                            store.deletePreset(preset)
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(Color(hex: "#6B7688"))
+                    FlowLayout(spacing: 8) {
+                        ForEach(store.presets) { preset in
+                            HStack(spacing: 6) {
+                                PresetChip(title: preset.name) {
+                                    store.applyPreset(preset)
+                                }
+
+                                Button {
+                                    store.deletePreset(preset)
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(Color(hex: "#6B7688"))
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
-                        .buttonStyle(.plain)
                     }
                 }
             }
         }
-        .padding(14)
-        .background(panelBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(panelStroke)
     }
 
     private var projectList: some View {
@@ -170,22 +198,13 @@ struct ContentView: View {
             .padding(.horizontal, 4)
             .padding(.bottom, 2)
     }
-
-    private var panelBackground: some View {
-        Color(hex: "#0F141D").opacity(0.94)
-    }
-
-    private var panelStroke: some View {
-        RoundedRectangle(cornerRadius: 18, style: .continuous)
-            .stroke(Color.white.opacity(0.06), lineWidth: 1)
-    }
 }
 
 private struct ProjectCard: View {
     @Binding var project: LaunchProject
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             Toggle("", isOn: $project.isEnabled)
                 .toggleStyle(.switch)
                 .labelsHidden()
@@ -200,8 +219,7 @@ private struct ProjectCard: View {
                     .foregroundStyle(Color(hex: "#7F8A9A"))
                     .lineLimit(1)
             }
-
-            Spacer(minLength: 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             Picker("Open With", selection: $project.launchTarget) {
                 ForEach(LaunchTarget.allCases) { target in
@@ -209,7 +227,7 @@ private struct ProjectCard: View {
                 }
             }
             .pickerStyle(.menu)
-            .frame(width: 132)
+            .frame(width: 162)
             .tint(Color(hex: "#DCE5F6"))
         }
         .padding(.horizontal, 12)
@@ -244,6 +262,75 @@ private struct PresetChip: View {
             Capsule()
                 .stroke(Color.white.opacity(0.05), lineWidth: 1)
         )
+    }
+}
+
+private struct BuiltInSetCard: View {
+    let title: String
+    let subtitle: String
+    let badge: String
+    let actionTitle: String?
+    let action: (() -> Void)?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text(title)
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color(hex: "#EEF3FA"))
+
+                Spacer(minLength: 6)
+
+                Text(badge)
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Color(hex: "#B7C2D6"))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color(hex: "#171F2C"))
+                    .clipShape(Capsule())
+            }
+
+            Text(subtitle)
+                .font(.system(size: 10, weight: .medium, design: .rounded))
+                .foregroundStyle(Color(hex: "#7F8A9A"))
+                .lineLimit(2)
+
+            if let actionTitle, let action {
+                Button(actionTitle, action: action)
+                    .buttonStyle(.bordered)
+                    .tint(Color(hex: "#7B8798"))
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(Color(hex: "#121925"))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.white.opacity(0.05), lineWidth: 1)
+        )
+    }
+}
+
+private struct PanelCard<Content: View>: View {
+    let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color(.sRGB, red: 15 / 255, green: 20 / 255, blue: 29 / 255, opacity: 0.94))
+
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color(.sRGB, red: 1, green: 1, blue: 1, opacity: 0.06), lineWidth: 1)
+
+            content
+                .padding(14)
+        }
     }
 }
 

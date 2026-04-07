@@ -195,61 +195,44 @@ struct PersistedState: Codable {
 
 enum DefaultProjects {
     static let all: [LaunchProject] = {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let projectsRoot = "\(home)/projects"
+        let fileManager = FileManager.default
+        let projectsURL = fileManager.homeDirectoryForCurrentUser.appendingPathComponent("projects", isDirectory: true)
 
-        return [
-            LaunchProject(
-                id: "infra-mgmt",
-                name: "Infra Mgmt",
-                path: "\(projectsRoot)/infra-mgmt",
-                isEnabled: true,
-                launchTarget: .default
-            ),
-            LaunchProject(
-                id: "portfolio-site",
-                name: "Portfolio Site",
-                path: "\(projectsRoot)/portfolio-site",
-                isEnabled: true,
-                launchTarget: .default
-            ),
-            LaunchProject(
-                id: "adaptive-mafia-game",
-                name: "Mafia Game",
-                path: "\(projectsRoot)/adaptive-mafia-game",
-                isEnabled: true,
-                launchTarget: .default
-            ),
-            LaunchProject(
-                id: "flappy-game",
-                name: "Flappy Game",
-                path: "\(projectsRoot)/flappy-game",
-                isEnabled: true,
-                launchTarget: .default
-            ),
-            LaunchProject(
-                id: "usage-meter",
-                name: "Usage Meter",
-                path: "\(projectsRoot)/usage-meter",
-                isEnabled: true,
-                launchTarget: .default
-            ),
-            LaunchProject(
-                id: "evolution",
-                name: "Evolution",
-                path: "\(projectsRoot)/evolution",
-                isEnabled: true,
-                launchTarget: .default
-            ),
-            LaunchProject(
-                id: "fluidics-test",
-                name: "Fluidics Test",
-                path: "\(projectsRoot)/fluidics-test",
-                isEnabled: true,
-                launchTarget: .default
-            ),
-        ]
+        guard let urls = try? fileManager.contentsOfDirectory(
+            at: projectsURL,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        return urls
+            .filter { url in
+                let values = try? url.resourceValues(forKeys: [.isDirectoryKey])
+                return values?.isDirectory == true
+            }
+            .sorted { $0.lastPathComponent.localizedCaseInsensitiveCompare($1.lastPathComponent) == .orderedAscending }
+            .map { url in
+                let slug = url.lastPathComponent
+                return LaunchProject(
+                    id: slug,
+                    name: prettyName(for: slug),
+                    path: url.path,
+                    isEnabled: false,
+                    launchTarget: .default
+                )
+            }
     }()
+
+    private static func prettyName(for slug: String) -> String {
+        slug
+            .split(separator: "-")
+            .map { part in
+                let text = String(part)
+                return text.prefix(1).uppercased() + text.dropFirst()
+            }
+            .joined(separator: " ")
+    }
 }
 
 private enum LegacyAssistantKind: String, Codable {

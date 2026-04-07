@@ -31,7 +31,10 @@ final class LauncherStore: ObservableObject {
         self.stateURL = LauncherStore.makeStateURL()
 
         let restoredState = LauncherStore.loadState(from: stateURL)
-        self.projects = restoredState?.projects ?? DefaultProjects.all
+        self.projects = LauncherStore.mergeProjects(
+            restored: restoredState?.projects ?? [],
+            discovered: DefaultProjects.all
+        )
         self.defaultLaunchTarget = restoredState?.defaultLaunchTarget ?? .claude
         self.presets = restoredState?.presets ?? []
         self.lastLaunchAt = restoredState?.lastLaunchAt
@@ -55,11 +58,11 @@ final class LauncherStore: ObservableObject {
     var launchButtonTitle: String {
         switch selectedCount {
         case 0:
-            return "Launch"
+            return "Launch 0 Windows"
         case 1:
-            return "Launch 1"
+            return "Launch 1 Window"
         default:
-            return "Launch \(selectedCount)"
+            return "Launch \(selectedCount) Windows"
         }
     }
 
@@ -98,8 +101,8 @@ final class LauncherStore: ObservableObject {
         return "\(selectedProjects.count) selected • " + pieces.joined(separator: " • ")
     }
 
-    var defaultPreset: LaunchPreset {
-        LaunchPreset(id: "default", name: "Default", projects: projectStates(from: DefaultProjects.all))
+    var currentSetSummary: String {
+        summaryText
     }
 
     var hasLastLaunchPreset: Bool {
@@ -107,9 +110,22 @@ final class LauncherStore: ObservableObject {
         return !lastLaunchPreset.isEmpty
     }
 
-    func resetToDefaultPreset() {
-        apply(states: defaultPreset.projects)
-        statusMessage = "Applied default preset."
+    var lastLaunchSummary: String {
+        guard let lastLaunchPreset else {
+            return "No launch captured yet"
+        }
+
+        let count = lastLaunchPreset.filter(\.isEnabled).count
+        if count == 0 {
+            return "No projects in last launch"
+        }
+
+        return "\(count) selected • \(lastLaunchDescription)"
+    }
+
+    func resetToStarterList() {
+        apply(states: projectStates(from: DefaultProjects.all))
+        statusMessage = "Applied starter list."
     }
 
     func applyLastLaunchPreset() {
@@ -371,6 +387,19 @@ final class LauncherStore: ObservableObject {
         }
 
         return decoded
+    }
+
+    private static func mergeProjects(
+        restored: [LaunchProject],
+        discovered: [LaunchProject]
+    ) -> [LaunchProject] {
+        guard !restored.isEmpty else {
+            return discovered
+        }
+
+        let restoredIDs = Set(restored.map(\.id))
+        let newProjects = discovered.filter { !restoredIDs.contains($0.id) }
+        return restored + newProjects
     }
 }
 
