@@ -13,12 +13,16 @@ final class LauncherStore: ObservableObject {
         didSet { persistState() }
     }
     @Published var presetDraft = ""
+    @Published var showAllProjects = false
     @Published var lastLaunchAt: String? {
         didSet { persistState() }
     }
     @Published var lastLaunchPreset: [PresetProjectState]? {
         didSet { persistState() }
     }
+    @Published private(set) var liveProjectStates: [PresetProjectState] = []
+    @Published private(set) var liveWindowCount = 0
+    @Published private(set) var liveTargetCounts: [LaunchTarget: Int] = [:]
     @Published var statusMessage = "Ready."
     @Published var alertMessage: String?
 
@@ -26,6 +30,7 @@ final class LauncherStore: ObservableObject {
     private let encoder = JSONEncoder()
     private let isoFormatter = ISO8601DateFormatter()
     private var isRestoring = false
+    private var liveRefreshTimer: Timer?
 
     init() {
         self.stateURL = LauncherStore.makeStateURL()
@@ -45,6 +50,9 @@ final class LauncherStore: ObservableObject {
         if restoredState == nil {
             persistState()
         }
+
+        refreshLiveSessions()
+        startLiveRefreshTimer()
     }
 
     var selectedProjects: [LaunchProject] {
@@ -102,7 +110,19 @@ final class LauncherStore: ObservableObject {
     }
 
     var currentSetSummary: String {
-        summaryText
+        guard liveWindowCount > 0 else {
+            return "No live windows detected"
+        }
+
+        let pieces = LaunchTarget.allCases
+            .filter { liveTargetCounts[$0] != nil }
+            .map { target in
+                "\(target.displayName) \(liveTargetCounts[target] ?? 0)"
+            }
+
+        let projectCount = Set(liveProjectStates.map(\.projectID)).count
+        let mappedSessionCount = liveProjectStates.count
+        return "\(liveWindowCount) live windows • \(mappedSessionCount) mapped • \(projectCount) projects • " + pieces.joined(separator: " • ")
     }
 
     var hasLastLaunchPreset: Bool {
@@ -128,6 +148,12 @@ final class LauncherStore: ObservableObject {
         statusMessage = "Applied starter list."
     }
 
+    func applyCurrentSet() {
+        guard !liveProjectStates.isEmpty else { return }
+        apply(states: dedupedProjectStates(liveProjectStates))
+        statusMessage = "Applied current set."
+    }
+
     func applyLastLaunchPreset() {
         guard let lastLaunchPreset else { return }
         apply(states: lastLaunchPreset)
@@ -150,7 +176,7 @@ final class LauncherStore: ObservableObject {
         let newPreset = LaunchPreset(
             id: normalized.replacingOccurrences(of: " ", with: "-"),
             name: rawName,
-            projects: currentProjectStates()
+            projects: currentPresetSource()
         )
 
         if let existingIndex = presets.firstIndex(where: { $0.name.lowercased() == normalized }) {
@@ -191,6 +217,7 @@ final class LauncherStore: ObservableObject {
             let snapshot = currentProjectStates()
             lastLaunchPreset = snapshot
             lastLaunchAt = isoFormatter.string(from: Date())
+            markProjectsAsSeen(selection.map(\.id), at: lastLaunchAt, overwrite: true)
             statusMessage = "Launched \(selection.count) project" + (selection.count == 1 ? "." : "s.")
         } catch {
             alertMessage = error.localizedDescription
@@ -198,8 +225,40 @@ final class LauncherStore: ObservableObject {
         }
     }
 
+    var visibleProjectIDs: [String] {
+        let relevantIDs = Set(currentRelevantProjectIDs())
+        return projects.compactMap { project in
+            if showAllProjects || relevantIDs.contains(project.id) {
+                return project.id
+            }
+            return nil
+        }
+    }
+
+    var hiddenProjectCount: Int {
+        max(projects.count - visibleProjectIDs.count, 0)
+    }
+
+    func binding(for projectID: String) -> Binding<LaunchProject> {
+        guard let index = projects.firstIndex(where: { $0.id == projectID }) else {
+            fatalError("Missing project binding for \(projectID)")
+        }
+
+        return Binding(
+            get: { self.projects[index] },
+            set: { self.projects[index] = $0 }
+        )
+    }
+
     private func currentProjectStates() -> [PresetProjectState] {
         projectStates(from: projects)
+    }
+
+    private func currentPresetSource() -> [PresetProjectState] {
+        if !liveProjectStates.isEmpty {
+            return dedupedProjectStates(liveProjectStates)
+        }
+        return currentProjectStates()
     }
 
     private func projectStates(from source: [LaunchProject]) -> [PresetProjectState] {
@@ -210,6 +269,19 @@ final class LauncherStore: ObservableObject {
                 launchTarget: $0.launchTarget
             )
         }
+    }
+
+    private func dedupedProjectStates(_ states: [PresetProjectState]) -> [PresetProjectState] {
+        var seen = Set<String>()
+        var result: [PresetProjectState] = []
+
+        for state in states {
+            guard !seen.contains(state.projectID) else { continue }
+            seen.insert(state.projectID)
+            result.append(state)
+        }
+
+        return result
     }
 
     private func apply(states: [PresetProjectState]) {
@@ -401,6 +473,289 @@ final class LauncherStore: ObservableObject {
         let newProjects = discovered.filter { !restoredIDs.contains($0.id) }
         return restored + newProjects
     }
+
+    private func currentRelevantProjectIDs() -> [String] {
+        var ids = Set<String>()
+
+        for project in projects where project.isEnabled {
+            ids.insert(project.id)
+        }
+
+        for state in liveProjectStates where state.isEnabled {
+            ids.insert(state.projectID)
+        }
+
+        for state in lastLaunchPreset ?? [] where state.isEnabled {
+            ids.insert(state.projectID)
+        }
+
+        for preset in presets {
+            for state in preset.projects where state.isEnabled {
+                ids.insert(state.projectID)
+            }
+        }
+
+        for project in projects where project.lastSeenAt != nil {
+            ids.insert(project.id)
+        }
+
+        return projects.compactMap { ids.contains($0.id) ? $0.id : nil }
+    }
+
+    private func startLiveRefreshTimer() {
+        liveRefreshTimer?.invalidate()
+        liveRefreshTimer = Timer.scheduledTimer(withTimeInterval: 8, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in
+                self.refreshLiveSessions()
+            }
+        }
+    }
+
+    private func refreshLiveSessions() {
+        let discovery = SessionDiscovery.discover(homeDirectory: NSHomeDirectory())
+
+        liveWindowCount = discovery.totalWindowCount
+        liveTargetCounts = discovery.targetCounts
+        liveProjectStates = discovery.sessions.map {
+            PresetProjectState(
+                projectID: $0.projectID,
+                isEnabled: true,
+                launchTarget: $0.launchTarget
+            )
+        }
+
+        mergeLiveProjectsIfNeeded(from: discovery.sessions)
+    }
+
+    private func mergeLiveProjectsIfNeeded(from sessions: [LiveSession]) {
+        let knownIDs = Set(projects.map(\.id))
+        var pendingIDs = Set<String>()
+        let newProjects = sessions.compactMap { session -> LaunchProject? in
+            guard !knownIDs.contains(session.projectID), pendingIDs.insert(session.projectID).inserted else { return nil }
+            return LaunchProject(
+                id: session.projectID,
+                name: session.projectName,
+                path: session.projectPath,
+                isEnabled: false,
+                launchTarget: session.launchTarget,
+                lastSeenAt: isoFormatter.string(from: Date())
+            )
+        }
+
+        if !newProjects.isEmpty {
+            projects.append(contentsOf: newProjects)
+        }
+
+        let liveIDs = Set(sessions.map(\.projectID))
+        guard !liveIDs.isEmpty else { return }
+        markProjectsAsSeen(Array(liveIDs), at: isoFormatter.string(from: Date()), overwrite: false)
+    }
+
+    private func markProjectsAsSeen(_ ids: [String], at timestamp: String?, overwrite: Bool) {
+        guard let timestamp else { return }
+        let idSet = Set(ids)
+        guard !idSet.isEmpty else { return }
+
+        var didChange = false
+        let updatedProjects = projects.map { project in
+            guard idSet.contains(project.id) else { return project }
+            guard overwrite || project.lastSeenAt == nil else { return project }
+            guard project.lastSeenAt != timestamp else { return project }
+
+            var updated = project
+            updated.lastSeenAt = timestamp
+            didChange = true
+            return updated
+        }
+
+        if didChange {
+            projects = updatedProjects
+        }
+    }
+}
+
+private struct LiveSession {
+    let projectID: String
+    let projectName: String
+    let projectPath: String
+    let launchTarget: LaunchTarget
+}
+
+private struct SessionDiscoveryResult {
+    let totalWindowCount: Int
+    let targetCounts: [LaunchTarget: Int]
+    let sessions: [LiveSession]
+}
+
+private enum SessionDiscovery {
+    private static let homeProjectsMarker = "/projects/"
+
+    static func discover(homeDirectory: String) -> SessionDiscoveryResult {
+        let ttyTargets = discoverTTYTargets()
+        guard !ttyTargets.isEmpty else {
+            return SessionDiscoveryResult(totalWindowCount: 0, targetCounts: [:], sessions: [])
+        }
+
+        let sessionRecords = discoverITermSessions()
+        let projectPrefix = homeDirectory + homeProjectsMarker
+        let targetCounts = Dictionary(ttyTargets.values.map { ($0, 1) }, uniquingKeysWith: +)
+
+        let sessions: [LiveSession] = sessionRecords.compactMap { record in
+            guard
+                let target = ttyTargets[record.tty],
+                let match = projectMatch(in: record.tail, projectPrefix: projectPrefix)
+            else {
+                return nil
+            }
+
+            return LiveSession(
+                projectID: match.projectID,
+                projectName: prettyName(for: match.projectID),
+                projectPath: match.projectPath,
+                launchTarget: target
+            )
+        }
+
+        return SessionDiscoveryResult(
+            totalWindowCount: ttyTargets.count,
+            targetCounts: targetCounts,
+            sessions: sessions
+        )
+    }
+
+    private static func discoverTTYTargets() -> [String: LaunchTarget] {
+        let command = """
+        ps -axo tty=,comm=,args= | egrep '(ttys|claude|opencode|gemini|codex)'
+        """
+        guard let output = run(command) else { return [:] }
+
+        var mapping: [String: LaunchTarget] = [:]
+        for line in output.split(separator: "\n") {
+            let text = String(line)
+            guard let tty = text.split(whereSeparator: \.isWhitespace).first.map(String.init), tty.hasPrefix("ttys") else {
+                continue
+            }
+
+            if text.contains(" claude") || text.contains("\tclaude") || text.contains("claude ") {
+                mapping["/dev/\(tty)"] = .claude
+            } else if text.contains(" opencode") || text.contains("\topencode") || text.contains("opencode ") {
+                mapping["/dev/\(tty)"] = .opencode
+            } else if text.contains("/opt/homebrew/bin/gemini") || text.contains(" gemini") {
+                mapping["/dev/\(tty)"] = .gemini
+            } else if text.contains("/codex/") || text.contains(" codex") || text.contains("/opt/homebrew/bin/codex") {
+                mapping["/dev/\(tty)"] = .codex
+            }
+        }
+
+        return mapping
+    }
+
+    private static func discoverITermSessions() -> [ITermSessionRecord] {
+        let script = """
+        set fieldSep to ASCII character 30
+        set recordSep to ASCII character 31
+        tell application id "com.googlecode.iterm2"
+          set outputRecords to {}
+          repeat with w in windows
+            repeat with t in tabs of w
+              repeat with s in sessions of t
+                set sessionName to ""
+                set sessionTTY to ""
+                set sessionTail to ""
+                try
+                  set sessionName to name of s as text
+                end try
+                try
+                  set sessionTTY to tty of s as text
+                end try
+                try
+                  set sessionContents to contents of s as text
+                  set sessionLength to length of sessionContents
+                  if sessionLength > 1600 then
+                    set sessionTail to text (sessionLength - 1599) thru sessionLength of sessionContents
+                  else
+                    set sessionTail to sessionContents
+                  end if
+                end try
+                set end of outputRecords to sessionName & fieldSep & sessionTTY & fieldSep & sessionTail
+              end repeat
+            end repeat
+          end repeat
+        end tell
+        set AppleScript's text item delimiters to recordSep
+        set joinedText to outputRecords as text
+        set AppleScript's text item delimiters to ""
+        return joinedText
+        """
+
+        guard let output = run("/usr/bin/osascript <<'APPLESCRIPT'\n\(script)\nAPPLESCRIPT") else {
+            return []
+        }
+
+        return output
+            .split(separator: Character("\u{1F}"))
+            .compactMap { record -> ITermSessionRecord? in
+                let fields = String(record).split(separator: Character("\u{1E}"), maxSplits: 2, omittingEmptySubsequences: false)
+                guard fields.count >= 3 else { return nil }
+                return ITermSessionRecord(
+                    name: String(fields[0]),
+                    tty: String(fields[1]),
+                    tail: String(fields[2])
+                )
+            }
+    }
+
+    private static func projectMatch(in text: String, projectPrefix: String) -> (projectID: String, projectPath: String)? {
+        let escapedPrefix = NSRegularExpression.escapedPattern(for: projectPrefix)
+        let pattern = escapedPrefix + #"([^/\s]+)"#
+
+        guard
+            let regex = try? NSRegularExpression(pattern: pattern),
+            let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+            let slugRange = Range(match.range(at: 1), in: text)
+        else {
+            return nil
+        }
+
+        let slug = String(text[slugRange])
+        return (slug, projectPrefix + slug)
+    }
+
+    private static func prettyName(for slug: String) -> String {
+        slug
+            .split(separator: "-")
+            .map { part in
+                let text = String(part)
+                return text.prefix(1).uppercased() + text.dropFirst()
+            }
+            .joined(separator: " ")
+    }
+
+    private static func run(_ command: String) -> String? {
+        let process = Process()
+        let outputPipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = ["-lc", command]
+        process.standardOutput = outputPipe
+        process.standardError = Pipe()
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else { return nil }
+            let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
+            return String(data: data, encoding: .utf8)
+        } catch {
+            return nil
+        }
+    }
+}
+
+private struct ITermSessionRecord {
+    let name: String
+    let tty: String
+    let tail: String
 }
 
 enum LaunchError: LocalizedError {

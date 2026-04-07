@@ -8,9 +8,9 @@ struct ProjectLauncherApp: App {
         WindowGroup("Project Launcher") {
             ContentView()
                 .environmentObject(store)
-                .frame(minWidth: 720, minHeight: 540)
+                .frame(minWidth: 660, minHeight: 500)
         }
         .windowResizability(.contentMinSize)
-        .defaultSize(width: 780, height: 620)
+        .defaultSize(width: 700, height: 560)
     }
 }

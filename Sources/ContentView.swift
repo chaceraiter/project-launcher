@@ -57,15 +57,15 @@ struct ContentView: View {
                             .font(.system(size: 11, weight: .medium, design: .rounded))
                             .foregroundStyle(Color(hex: "#8E99AB"))
                     }
-                    .frame(width: 190, alignment: .leading)
+                    .frame(width: 170, alignment: .leading)
 
                     Spacer(minLength: 0)
 
                     Button(action: store.launchSelected) {
                         Text(store.launchButtonTitle)
-                            .font(.system(size: 14, weight: .bold, design: .rounded))
-                            .frame(width: 208)
-                            .padding(.vertical, 6)
+                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                            .frame(width: 230)
+                            .padding(.vertical, 8)
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(Color(hex: "#2E76FF"))
@@ -82,10 +82,10 @@ struct ContentView: View {
                             }
                         }
                         .pickerStyle(.menu)
-                        .frame(width: 118)
+                        .frame(width: 104)
                         .tint(Color(hex: "#EEF2FF"))
                     }
-                    .frame(width: 136, alignment: .trailing)
+                    .frame(width: 122, alignment: .trailing)
                 }
 
                 Text(store.summaryText)
@@ -118,13 +118,13 @@ struct ContentView: View {
                         .font(.system(size: 11, weight: .semibold, design: .rounded))
                 }
 
-                HStack(spacing: 10) {
+                HStack(alignment: .top, spacing: 10) {
                     BuiltInSetCard(
                         title: "Current Set",
                         subtitle: store.currentSetSummary,
                         badge: "Live",
-                        actionTitle: nil as String?,
-                        action: nil as (() -> Void)?
+                        actionTitle: store.liveProjectStates.isEmpty ? nil : "Load",
+                        action: store.liveProjectStates.isEmpty ? nil : { store.applyCurrentSet() }
                     )
 
                     BuiltInSetCard(
@@ -136,45 +136,57 @@ struct ContentView: View {
                     )
                 }
 
-                HStack(spacing: 8) {
-                    TextField("Preset name", text: $store.presetDraft)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 8)
-                        .background(Color(hex: "#121925"))
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .stroke(Color.white.opacity(0.06), lineWidth: 1)
-                        )
+                PanelInset {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Save Preset")
+                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            .foregroundStyle(Color(hex: "#7F8A9A"))
 
-                    Button("Save Current", action: store.saveCurrentPreset)
-                        .buttonStyle(.bordered)
-                        .tint(Color(hex: "#7B8798"))
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        HStack(spacing: 8) {
+                            TextField("Preset name", text: $store.presetDraft)
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 12, weight: .medium, design: .rounded))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 8)
+                                .background(Color(hex: "#0F1520"))
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .stroke(Color.white.opacity(0.06), lineWidth: 1)
+                                )
+
+                            Button("Save Current", action: store.saveCurrentPreset)
+                                .buttonStyle(.bordered)
+                                .tint(Color(hex: "#7B8798"))
+                                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        }
+                    }
                 }
 
                 if !store.presets.isEmpty {
-                    Text("Saved Presets")
-                        .font(.system(size: 10, weight: .semibold, design: .rounded))
-                        .foregroundStyle(Color(hex: "#7F8A9A"))
+                    PanelInset {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Saved Presets")
+                                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                .foregroundStyle(Color(hex: "#7F8A9A"))
 
-                    FlowLayout(spacing: 8) {
-                        ForEach(store.presets) { preset in
-                            HStack(spacing: 6) {
-                                PresetChip(title: preset.name) {
-                                    store.applyPreset(preset)
-                                }
+                            FlowLayout(spacing: 8) {
+                                ForEach(store.presets) { preset in
+                                    HStack(spacing: 6) {
+                                        PresetChip(title: preset.name) {
+                                            store.applyPreset(preset)
+                                        }
 
-                                Button {
-                                    store.deletePreset(preset)
-                                } label: {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .font(.system(size: 12, weight: .semibold))
-                                        .foregroundStyle(Color(hex: "#6B7688"))
+                                        Button {
+                                            store.deletePreset(preset)
+                                        } label: {
+                                            Image(systemName: "xmark.circle.fill")
+                                                .font(.system(size: 12, weight: .semibold))
+                                                .foregroundStyle(Color(hex: "#6B7688"))
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
                                 }
-                                .buttonStyle(.plain)
                             }
                         }
                     }
@@ -185,8 +197,25 @@ struct ContentView: View {
 
     private var projectList: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ForEach($store.projects) { $project in
-                ProjectCard(project: $project)
+            HStack(spacing: 8) {
+                Text("Projects")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Color(hex: "#7F8A9A"))
+
+                Spacer(minLength: 8)
+
+                if store.hiddenProjectCount > 0 {
+                    Button(store.showAllProjects ? "Collapse" : "Show All \(store.hiddenProjectCount)") {
+                        store.showAllProjects.toggle()
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(Color(hex: "#7B8798"))
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                }
+            }
+
+            ForEach(store.visibleProjectIDs, id: \.self) { projectID in
+                ProjectCard(project: store.binding(for: projectID))
             }
         }
     }
@@ -227,7 +256,7 @@ private struct ProjectCard: View {
                 }
             }
             .pickerStyle(.menu)
-            .frame(width: 162)
+            .frame(width: 214)
             .tint(Color(hex: "#DCE5F6"))
         }
         .padding(.horizontal, 12)
@@ -240,6 +269,25 @@ private struct ProjectCard: View {
         )
         .opacity(project.isEnabled ? 1.0 : 0.58)
         .animation(.easeInOut(duration: 0.14), value: project.isEnabled)
+    }
+}
+
+private struct PanelInset<Content: View>: View {
+    let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .padding(12)
+            .background(Color(hex: "#121925"))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(Color.white.opacity(0.05), lineWidth: 1)
+            )
     }
 }
 

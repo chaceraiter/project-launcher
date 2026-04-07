@@ -66,19 +66,22 @@ struct LaunchProject: Identifiable, Codable, Equatable {
     var path: String
     var isEnabled: Bool
     var launchTarget: LaunchTarget
+    var lastSeenAt: String?
 
     init(
         id: String,
         name: String,
         path: String,
         isEnabled: Bool,
-        launchTarget: LaunchTarget
+        launchTarget: LaunchTarget,
+        lastSeenAt: String? = nil
     ) {
         self.id = id
         self.name = name
         self.path = path
         self.isEnabled = isEnabled
         self.launchTarget = launchTarget
+        self.lastSeenAt = lastSeenAt
     }
 
     enum CodingKeys: String, CodingKey {
@@ -87,6 +90,7 @@ struct LaunchProject: Identifiable, Codable, Equatable {
         case path
         case isEnabled
         case launchTarget
+        case lastSeenAt
         case assistant
         case editor
     }
@@ -97,6 +101,7 @@ struct LaunchProject: Identifiable, Codable, Equatable {
         name = try container.decode(String.self, forKey: .name)
         path = try container.decode(String.self, forKey: .path)
         isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
+        lastSeenAt = try container.decodeIfPresent(String.self, forKey: .lastSeenAt)
 
         if let target = try container.decodeIfPresent(LaunchTarget.self, forKey: .launchTarget) {
             launchTarget = target
@@ -139,6 +144,7 @@ struct LaunchProject: Identifiable, Codable, Equatable {
         try container.encode(path, forKey: .path)
         try container.encode(isEnabled, forKey: .isEnabled)
         try container.encode(launchTarget, forKey: .launchTarget)
+        try container.encodeIfPresent(lastSeenAt, forKey: .lastSeenAt)
     }
 }
 
