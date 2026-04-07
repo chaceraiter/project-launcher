@@ -2,30 +2,29 @@
 
 Project Launcher is a native SwiftUI macOS app for restoring a saved working set of CLI sessions after a restart.
 
-It is intentionally simple: pick the projects you want back, choose which assistant CLI should open in each one, optionally open an editor too, and launch the whole set in one shot.
+It is intentionally simple: pick the projects you want back, choose what each project should open with, save named presets, and launch the whole set in one shot.
 
 ## Features
 
 - Native SwiftUI desktop app for macOS 14+
-- Per-project launcher rows with assistant selection
-- Optional editor launch for each project
+- Per-project launch target rows
+- Global default launch target plus per-project overrides
+- Named presets and automatic last-launch recall
 - Persistent saved state in Application Support
 - iTerm-first terminal launching with Terminal fallback
 - Custom bundled app icon generated locally during packaging
 - Opinionated default project paths under `~/projects`
 
-## Supported assistants
+## Supported launch targets
 
 - Claude Code
 - Codex CLI
 - Gemini CLI
 - OpenCode
-
-## Supported editors
-
-- None
 - Cursor
 - VS Code
+- None
+- Default
 
 ## Run in development
 

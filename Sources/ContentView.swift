@@ -5,19 +5,26 @@ struct ContentView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                heroCard
-                actionRow
+            VStack(alignment: .leading, spacing: 12) {
+                topBar
+                presetSection
                 projectList
                 footer
             }
-            .padding(28)
+            .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(backgroundGradient)
-        .onReceive(store.$projects) { _ in
-            store.projectChanged()
-        }
+        .background(
+            LinearGradient(
+                colors: [
+                    Color(hex: "#0B0E13"),
+                    Color(hex: "#111722"),
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+        )
         .alert(
             "Project Launcher",
             isPresented: Binding(
@@ -37,87 +44,119 @@ struct ContentView: View {
         }
     }
 
-    private var heroCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Project Launcher")
-                .font(.system(size: 34, weight: .bold, design: .rounded))
-                .foregroundStyle(Color(red: 0.10, green: 0.20, blue: 0.22))
+    private var topBar: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Project Launcher")
+                        .font(.system(size: 23, weight: .bold, design: .rounded))
+                        .foregroundStyle(Color(hex: "#F7F9FC"))
 
-            Text("Bring back your working set after a restart. Choose which projects should launch, pick the assistant for each one, and optionally open the editor too.")
-                .font(.system(size: 15, weight: .medium, design: .rounded))
-                .foregroundStyle(Color(red: 0.24, green: 0.32, blue: 0.34))
-                .fixedSize(horizontal: false, vertical: true)
-
-            HStack(spacing: 10) {
-                Label("Last launch", systemImage: "clock.arrow.circlepath")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundStyle(Color(red: 0.29, green: 0.38, blue: 0.40))
-
-                Text(store.lastLaunchDescription)
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundStyle(Color(red: 0.34, green: 0.42, blue: 0.44))
-            }
-
-            FlowLayout(spacing: 10) {
-                ForEach(store.summaryChips, id: \.self) { chip in
-                    Text(chip)
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 7)
-                        .background(Color.white.opacity(0.72))
-                        .clipShape(Capsule())
-                        .overlay(
-                            Capsule()
-                                .stroke(Color.white.opacity(0.68), lineWidth: 1)
-                        )
+                    Text("Last launch \(store.lastLaunchDescription)")
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundStyle(Color(hex: "#8E99AB"))
                 }
+
+                Spacer(minLength: 8)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Default")
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .foregroundStyle(Color(hex: "#8E99AB"))
+
+                    Picker("Default", selection: $store.defaultLaunchTarget) {
+                        ForEach(LaunchTarget.defaultChoices) { target in
+                            Text(target.displayName).tag(target)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .frame(width: 150)
+                    .tint(Color(hex: "#EEF2FF"))
+                }
+
+                Button(action: store.launchSelected) {
+                    Text(store.launchButtonTitle)
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .frame(minWidth: 98)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Color(hex: "#2E76FF"))
+                .disabled(store.selectedCount == 0)
             }
+
+            Text(store.summaryText)
+                .font(.system(size: 11, weight: .medium, design: .rounded))
+                .foregroundStyle(Color(hex: "#A9B3C4"))
         }
-        .padding(24)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            LinearGradient(
-                colors: [
-                    Color(red: 0.92, green: 0.97, blue: 0.95),
-                    Color(red: 0.98, green: 0.94, blue: 0.88),
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .stroke(Color.white.opacity(0.75), lineWidth: 1)
-        )
-        .shadow(color: Color.black.opacity(0.06), radius: 20, x: 0, y: 12)
+        .padding(14)
+        .background(panelBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(panelStroke)
     }
 
-    private var actionRow: some View {
-        HStack(spacing: 14) {
-            Button(action: store.launchSelected) {
-                HStack(spacing: 10) {
-                    Image(systemName: "play.fill")
-                    Text(store.launchButtonTitle)
-                }
-                .font(.system(size: 15, weight: .bold, design: .rounded))
-                .frame(minWidth: 220)
+    private var presetSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                TextField("Preset name", text: $store.presetDraft)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(Color(hex: "#121925"))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(Color.white.opacity(0.06), lineWidth: 1)
+                    )
+
+                Button("Save Preset", action: store.saveCurrentPreset)
+                    .buttonStyle(.bordered)
+                    .tint(Color(hex: "#7B8798"))
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+
+                Button("Reset Default", action: store.resetToDefaultPreset)
+                    .buttonStyle(.bordered)
+                    .tint(Color(hex: "#7B8798"))
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
             }
-            .buttonStyle(.borderedProminent)
-            .tint(Color(red: 0.13, green: 0.45, blue: 0.39))
-            .disabled(store.selectedCount == 0)
 
-            Button("Reset Defaults", action: store.resetDefaults)
-                .buttonStyle(.bordered)
-                .font(.system(size: 14, weight: .semibold, design: .rounded))
-                .tint(Color(red: 0.23, green: 0.30, blue: 0.34))
+            FlowLayout(spacing: 8) {
+                PresetChip(title: "Default") {
+                    store.resetToDefaultPreset()
+                }
 
-            Spacer()
+                if store.hasLastLaunchPreset {
+                    PresetChip(title: "Last Launch") {
+                        store.applyLastLaunchPreset()
+                    }
+                }
+
+                ForEach(store.presets) { preset in
+                    HStack(spacing: 6) {
+                        PresetChip(title: preset.name) {
+                            store.applyPreset(preset)
+                        }
+
+                        Button {
+                            store.deletePreset(preset)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(Color(hex: "#6B7688"))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
         }
+        .padding(14)
+        .background(panelBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(panelStroke)
     }
 
     private var projectList: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 8) {
             ForEach($store.projects) { $project in
                 ProjectCard(project: $project)
             }
@@ -126,22 +165,19 @@ struct ContentView: View {
 
     private var footer: some View {
         Text(store.statusMessage)
-            .font(.system(size: 13, weight: .semibold, design: .rounded))
-            .foregroundStyle(Color(red: 0.32, green: 0.40, blue: 0.42))
+            .font(.system(size: 11, weight: .medium, design: .rounded))
+            .foregroundStyle(Color(hex: "#7F8A9A"))
             .padding(.horizontal, 4)
-            .padding(.bottom, 8)
+            .padding(.bottom, 2)
     }
 
-    private var backgroundGradient: some View {
-        LinearGradient(
-            colors: [
-                Color(red: 0.95, green: 0.93, blue: 0.89),
-                Color(red: 0.91, green: 0.95, blue: 0.96),
-            ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-        .ignoresSafeArea()
+    private var panelBackground: some View {
+        Color(hex: "#0F141D").opacity(0.94)
+    }
+
+    private var panelStroke: some View {
+        RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .stroke(Color.white.opacity(0.06), lineWidth: 1)
     }
 }
 
@@ -149,82 +185,65 @@ private struct ProjectCard: View {
     @Binding var project: LaunchProject
 
     var body: some View {
-        HStack(alignment: .top, spacing: 18) {
+        HStack(spacing: 12) {
             Toggle("", isOn: $project.isEnabled)
                 .toggleStyle(.switch)
                 .labelsHidden()
-                .padding(.top, 2)
 
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 10) {
-                    Text(project.name)
-                        .font(.system(size: 20, weight: .bold, design: .rounded))
-                        .foregroundStyle(Color(red: 0.11, green: 0.20, blue: 0.22))
-
-                    AssistantBadge(assistant: project.assistant)
-                }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(project.name)
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Color(hex: "#EFF3FA"))
 
                 Text(project.path)
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .foregroundStyle(Color(red: 0.39, green: 0.46, blue: 0.48))
-
-                HStack(spacing: 16) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Assistant")
-                            .font(.system(size: 11, weight: .bold, design: .rounded))
-                            .foregroundStyle(Color(red: 0.42, green: 0.49, blue: 0.52))
-
-                        Picker("Assistant", selection: $project.assistant) {
-                            ForEach(AssistantKind.allCases) { assistant in
-                                Text(assistant.displayName).tag(assistant)
-                            }
-                        }
-                        .pickerStyle(.menu)
-                        .frame(width: 180)
-                    }
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Editor")
-                            .font(.system(size: 11, weight: .bold, design: .rounded))
-                            .foregroundStyle(Color(red: 0.42, green: 0.49, blue: 0.52))
-
-                        Picker("Editor", selection: $project.editor) {
-                            ForEach(EditorKind.allCases) { editor in
-                                Text(editor.displayName).tag(editor)
-                            }
-                        }
-                        .pickerStyle(.menu)
-                        .frame(width: 160)
-                    }
-                }
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(Color(hex: "#7F8A9A"))
+                    .lineLimit(1)
             }
 
-            Spacer()
+            Spacer(minLength: 8)
+
+            Picker("Open With", selection: $project.launchTarget) {
+                ForEach(LaunchTarget.allCases) { target in
+                    Text(target.displayName).tag(target)
+                }
+            }
+            .pickerStyle(.menu)
+            .frame(width: 132)
+            .tint(Color(hex: "#DCE5F6"))
         }
-        .padding(20)
-        .background(Color.white.opacity(0.76))
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Color(hex: "#121925"))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(Color.white.opacity(0.86), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.white.opacity(0.05), lineWidth: 1)
         )
-        .shadow(color: Color.black.opacity(0.04), radius: 14, x: 0, y: 10)
-        .opacity(project.isEnabled ? 1.0 : 0.66)
-        .animation(.easeInOut(duration: 0.16), value: project.isEnabled)
+        .opacity(project.isEnabled ? 1.0 : 0.58)
+        .animation(.easeInOut(duration: 0.14), value: project.isEnabled)
     }
 }
 
-private struct AssistantBadge: View {
-    let assistant: AssistantKind
+private struct PresetChip: View {
+    let title: String
+    let action: () -> Void
 
     var body: some View {
-        Text(assistant.displayName)
-            .font(.system(size: 11, weight: .bold, design: .rounded))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .foregroundStyle(.white)
-            .background(Color(hex: assistant.tintHex))
-            .clipShape(Capsule())
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundStyle(Color(hex: "#D6DEED"))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+        }
+        .buttonStyle(.plain)
+        .background(Color(hex: "#171F2C"))
+        .clipShape(Capsule())
+        .overlay(
+            Capsule()
+                .stroke(Color.white.opacity(0.05), lineWidth: 1)
+        )
     }
 }
 
@@ -240,7 +259,7 @@ private struct FlowLayout: Layout {
         subviews: Subviews,
         cache: inout ()
     ) -> CGSize {
-        let maxWidth = proposal.width ?? 800
+        let maxWidth = proposal.width ?? 700
         var cursor = CGPoint.zero
         var lineHeight: CGFloat = 0
 

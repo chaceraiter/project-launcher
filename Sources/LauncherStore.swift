@@ -3,14 +3,27 @@ import SwiftUI
 
 @MainActor
 final class LauncherStore: ObservableObject {
-    @Published var projects: [LaunchProject]
-    @Published var lastLaunchAt: String?
-    @Published var statusMessage = "Ready to launch project sessions."
+    @Published var projects: [LaunchProject] {
+        didSet { persistState() }
+    }
+    @Published var defaultLaunchTarget: LaunchTarget {
+        didSet { persistState() }
+    }
+    @Published var presets: [LaunchPreset] {
+        didSet { persistState() }
+    }
+    @Published var presetDraft = ""
+    @Published var lastLaunchAt: String? {
+        didSet { persistState() }
+    }
+    @Published var lastLaunchPreset: [PresetProjectState]? {
+        didSet { persistState() }
+    }
+    @Published var statusMessage = "Ready."
     @Published var alertMessage: String?
 
     private let stateURL: URL
     private let encoder = JSONEncoder()
-    private let decoder = JSONDecoder()
     private let isoFormatter = ISO8601DateFormatter()
     private var isRestoring = false
 
@@ -19,10 +32,12 @@ final class LauncherStore: ObservableObject {
 
         let restoredState = LauncherStore.loadState(from: stateURL)
         self.projects = restoredState?.projects ?? DefaultProjects.all
+        self.defaultLaunchTarget = restoredState?.defaultLaunchTarget ?? .claude
+        self.presets = restoredState?.presets ?? []
         self.lastLaunchAt = restoredState?.lastLaunchAt
+        self.lastLaunchPreset = restoredState?.lastLaunchPreset
 
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        decoder.dateDecodingStrategy = .iso8601
 
         if restoredState == nil {
             persistState()
@@ -38,14 +53,19 @@ final class LauncherStore: ObservableObject {
     }
 
     var launchButtonTitle: String {
-        let count = selectedCount
-        guard count > 0 else { return "Launch Selected" }
-        return count == 1 ? "Launch 1 Session" : "Launch \(count) Sessions"
+        switch selectedCount {
+        case 0:
+            return "Launch"
+        case 1:
+            return "Launch 1"
+        default:
+            return "Launch \(selectedCount)"
+        }
     }
 
     var lastLaunchDescription: String {
         guard let lastLaunchAt else {
-            return "Never launched from this app yet."
+            return "Never"
         }
 
         guard let date = isoFormatter.date(from: lastLaunchAt) else {
@@ -56,48 +76,86 @@ final class LauncherStore: ObservableObject {
             .dateTime
                 .month(.abbreviated)
                 .day()
-                .year()
                 .hour(.defaultDigits(amPM: .abbreviated))
                 .minute()
-                .second()
         )
     }
 
-    var summaryChips: [String] {
+    var summaryText: String {
         guard !selectedProjects.isEmpty else {
-            return ["No projects selected"]
+            return "No projects selected"
         }
 
-        var chips = ["\(selectedProjects.count) selected"]
-        for assistant in AssistantKind.allCases {
-            let count = selectedProjects.filter { $0.assistant == assistant }.count
-            if count > 0 {
-                chips.append("\(assistant.displayName): \(count)")
+        let grouped = Dictionary(grouping: selectedProjects, by: { resolvedTarget(for: $0).displayName })
+        let pieces = grouped
+            .keys
+            .sorted()
+            .map { key in
+                let count = grouped[key]?.count ?? 0
+                return "\(key) \(count)"
             }
-        }
-        return chips
+
+        return "\(selectedProjects.count) selected • " + pieces.joined(separator: " • ")
     }
 
-    func resetDefaults() {
-        isRestoring = true
-        projects = DefaultProjects.all
-        isRestoring = false
-        persistState()
-        statusMessage = "Restored the default launch set."
+    var defaultPreset: LaunchPreset {
+        LaunchPreset(id: "default", name: "Default", projects: projectStates(from: DefaultProjects.all))
     }
 
-    func persistState() {
-        guard !isRestoring else { return }
+    var hasLastLaunchPreset: Bool {
+        guard let lastLaunchPreset else { return false }
+        return !lastLaunchPreset.isEmpty
+    }
 
-        let state = PersistedState(lastLaunchAt: lastLaunchAt, projects: projects)
-        do {
-            let folder = stateURL.deletingLastPathComponent()
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            let data = try encoder.encode(state)
-            try data.write(to: stateURL, options: .atomic)
-        } catch {
-            statusMessage = "State save failed: \(error.localizedDescription)"
+    func resetToDefaultPreset() {
+        apply(states: defaultPreset.projects)
+        statusMessage = "Applied default preset."
+    }
+
+    func applyLastLaunchPreset() {
+        guard let lastLaunchPreset else { return }
+        apply(states: lastLaunchPreset)
+        statusMessage = "Applied last launch."
+    }
+
+    func applyPreset(_ preset: LaunchPreset) {
+        apply(states: preset.projects)
+        statusMessage = "Applied \(preset.name)."
+    }
+
+    func saveCurrentPreset() {
+        let rawName = presetDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !rawName.isEmpty else {
+            alertMessage = "Enter a preset name first."
+            return
         }
+
+        let normalized = rawName.lowercased()
+        let newPreset = LaunchPreset(
+            id: normalized.replacingOccurrences(of: " ", with: "-"),
+            name: rawName,
+            projects: currentProjectStates()
+        )
+
+        if let existingIndex = presets.firstIndex(where: { $0.name.lowercased() == normalized }) {
+            presets[existingIndex] = newPreset
+            statusMessage = "Updated preset \(rawName)."
+        } else {
+            presets.append(newPreset)
+            presets.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            statusMessage = "Saved preset \(rawName)."
+        }
+
+        presetDraft = ""
+    }
+
+    func deletePreset(_ preset: LaunchPreset) {
+        presets.removeAll { $0.id == preset.id }
+        statusMessage = "Deleted preset \(preset.name)."
+    }
+
+    func resolvedTarget(for project: LaunchProject) -> LaunchTarget {
+        project.launchTarget == .default ? defaultLaunchTarget : project.launchTarget
     }
 
     func launchSelected() {
@@ -111,44 +169,101 @@ final class LauncherStore: ObservableObject {
             try validate(selection)
 
             for project in selection {
-                if project.editor != .none {
-                    try launchEditor(project)
-                }
+                try launch(project: project, target: resolvedTarget(for: project))
             }
 
-            for project in selection {
-                try launchAssistant(project)
-            }
-
+            let snapshot = currentProjectStates()
+            lastLaunchPreset = snapshot
             lastLaunchAt = isoFormatter.string(from: Date())
-            persistState()
-            statusMessage = "Launched \(selection.count) session" + (selection.count == 1 ? "." : "s.")
+            statusMessage = "Launched \(selection.count) project" + (selection.count == 1 ? "." : "s.")
         } catch {
             alertMessage = error.localizedDescription
             statusMessage = "Launch failed."
         }
     }
 
-    func projectChanged() {
+    private func currentProjectStates() -> [PresetProjectState] {
+        projectStates(from: projects)
+    }
+
+    private func projectStates(from source: [LaunchProject]) -> [PresetProjectState] {
+        source.map {
+            PresetProjectState(
+                projectID: $0.id,
+                isEnabled: $0.isEnabled,
+                launchTarget: $0.launchTarget
+            )
+        }
+    }
+
+    private func apply(states: [PresetProjectState]) {
+        isRestoring = true
+        let stateByID = Dictionary(uniqueKeysWithValues: states.map { ($0.projectID, $0) })
+        projects = projects.map { project in
+            guard let presetState = stateByID[project.id] else { return project }
+            var updated = project
+            updated.isEnabled = presetState.isEnabled
+            updated.launchTarget = presetState.launchTarget
+            return updated
+        }
+        isRestoring = false
         persistState()
     }
 
+    private func persistState() {
+        guard !isRestoring else { return }
+
+        let state = PersistedState(
+            lastLaunchAt: lastLaunchAt,
+            defaultLaunchTarget: defaultLaunchTarget,
+            projects: projects,
+            presets: presets,
+            lastLaunchPreset: lastLaunchPreset
+        )
+
+        do {
+            let folder = stateURL.deletingLastPathComponent()
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let data = try encoder.encode(state)
+            try data.write(to: stateURL, options: .atomic)
+        } catch {
+            statusMessage = "State save failed: \(error.localizedDescription)"
+        }
+    }
+
     private func validate(_ projects: [LaunchProject]) throws {
+        var launchableCount = 0
+        var needsTerminal = false
+
         for project in projects {
             guard FileManager.default.fileExists(atPath: project.path) else {
                 throw LaunchError.generic("Missing project folder for \(project.name):\n\(project.path)")
             }
 
-            guard commandExists(project.assistant.command) else {
-                throw LaunchError.generic("Missing CLI command for \(project.assistant.displayName).")
+            let target = resolvedTarget(for: project)
+            if target == .none {
+                continue
             }
 
-            if let appName = project.editor.appName, !applicationExists(named: appName) {
-                throw LaunchError.generic("Missing editor app for \(project.editor.displayName).")
+            launchableCount += 1
+
+            if let command = target.command {
+                needsTerminal = true
+                if !commandExists(command) {
+                    throw LaunchError.generic("Missing command for \(target.displayName).")
+                }
+            }
+
+            if let appName = target.appName, !applicationExists(named: appName) {
+                throw LaunchError.generic("Missing app for \(target.displayName).")
             }
         }
 
-        if !terminalHostExists {
+        if launchableCount == 0 {
+            throw LaunchError.generic("Every selected project is set to None.")
+        }
+
+        if needsTerminal && !terminalHostExists {
             throw LaunchError.generic("Neither iTerm nor Terminal.app is available.")
         }
     }
@@ -181,18 +296,27 @@ final class LauncherStore: ObservableObject {
         return commonPaths.contains(where: FileManager.default.fileExists(atPath:))
     }
 
-    private func launchEditor(_ project: LaunchProject) throws {
-        guard let appName = project.editor.appName else { return }
+    private func launch(project: LaunchProject, target: LaunchTarget) throws {
+        if let appName = target.appName {
+            try launchApp(name: appName, path: project.path)
+            return
+        }
 
+        if let command = target.command {
+            try launchTerminal(command: command, path: project.path)
+        }
+    }
+
+    private func launchApp(name: String, path: String) throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        process.arguments = ["-a", appName, project.path]
+        process.arguments = ["-a", name, path]
         try process.run()
     }
 
-    private func launchAssistant(_ project: LaunchProject) throws {
-        let quotedPath = project.path.replacingOccurrences(of: "'", with: "'\"'\"'")
-        let shellCommand = "cd '\(quotedPath)' && clear && \(project.assistant.command)"
+    private func launchTerminal(command: String, path: String) throws {
+        let quotedPath = path.replacingOccurrences(of: "'", with: "'\"'\"'")
+        let shellCommand = "cd '\(quotedPath)' && clear && \(command)"
 
         let script: String
         if FileManager.default.fileExists(atPath: "/Applications/iTerm.app") {
@@ -227,7 +351,7 @@ final class LauncherStore: ObservableObject {
         process.waitUntilExit()
 
         if process.terminationStatus != 0 {
-            throw LaunchError.generic("Could not open \(project.assistant.displayName) for \(project.name).")
+            throw LaunchError.generic("Could not launch \(command) in \(path).")
         }
     }
 
