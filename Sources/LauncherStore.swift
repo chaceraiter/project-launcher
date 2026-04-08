@@ -121,8 +121,7 @@ final class LauncherStore: ObservableObject {
             }
 
         let projectCount = Set(liveProjectStates.map(\.projectID)).count
-        let mappedSessionCount = liveProjectStates.count
-        return "\(liveWindowCount) live windows • \(mappedSessionCount) mapped • \(projectCount) projects • " + pieces.joined(separator: " • ")
+        return "\(liveWindowCount) live windows • \(projectCount) projects • " + pieces.joined(separator: " • ")
     }
 
     var hasLastLaunchPreset: Bool {
@@ -288,7 +287,11 @@ final class LauncherStore: ObservableObject {
         isRestoring = true
         let stateByID = Dictionary(uniqueKeysWithValues: states.map { ($0.projectID, $0) })
         projects = projects.map { project in
-            guard let presetState = stateByID[project.id] else { return project }
+            guard let presetState = stateByID[project.id] else {
+                var updated = project
+                updated.isEnabled = false
+                return updated
+            }
             var updated = project
             updated.isEnabled = presetState.isEnabled
             updated.launchTarget = presetState.launchTarget
@@ -475,31 +478,40 @@ final class LauncherStore: ObservableObject {
     }
 
     private func currentRelevantProjectIDs() -> [String] {
-        var ids = Set<String>()
+        var explicitIDs = Set<String>()
+        var seenIDs = Set<String>()
 
         for project in projects where project.isEnabled {
-            ids.insert(project.id)
+            explicitIDs.insert(project.id)
         }
 
         for state in liveProjectStates where state.isEnabled {
-            ids.insert(state.projectID)
+            explicitIDs.insert(state.projectID)
         }
 
         for state in lastLaunchPreset ?? [] where state.isEnabled {
-            ids.insert(state.projectID)
+            explicitIDs.insert(state.projectID)
         }
 
         for preset in presets {
             for state in preset.projects where state.isEnabled {
-                ids.insert(state.projectID)
+                explicitIDs.insert(state.projectID)
             }
         }
 
         for project in projects where project.lastSeenAt != nil {
-            ids.insert(project.id)
+            if !isAuxiliaryProjectVariant(project.id) {
+                seenIDs.insert(project.id)
+            }
         }
 
+        let ids = explicitIDs.union(seenIDs)
         return projects.compactMap { ids.contains($0.id) ? $0.id : nil }
+    }
+
+    // Keep coordination/worktree variants out of the default list unless they are explicitly active.
+    private func isAuxiliaryProjectVariant(_ projectID: String) -> Bool {
+        projectID.hasSuffix("-coordination") || projectID.hasSuffix("-worktrees")
     }
 
     private func startLiveRefreshTimer() {
@@ -514,18 +526,16 @@ final class LauncherStore: ObservableObject {
 
     private func refreshLiveSessions() {
         let discovery = SessionDiscovery.discover(homeDirectory: NSHomeDirectory())
+        mergeLiveProjectsIfNeeded(from: discovery.sessions)
+        let normalizedStates = supplementedLiveProjectStates(
+            from: normalizedLiveProjectStates(from: discovery.sessions),
+            targetCounts: discovery.targetCounts
+        )
 
         liveWindowCount = discovery.totalWindowCount
         liveTargetCounts = discovery.targetCounts
-        liveProjectStates = discovery.sessions.map {
-            PresetProjectState(
-                projectID: $0.projectID,
-                isEnabled: true,
-                launchTarget: $0.launchTarget
-            )
-        }
-
-        mergeLiveProjectsIfNeeded(from: discovery.sessions)
+        liveProjectStates = normalizedStates
+        syncProjectsToLiveCurrentSet(normalizedStates)
     }
 
     private func mergeLiveProjectsIfNeeded(from sessions: [LiveSession]) {
@@ -572,6 +582,100 @@ final class LauncherStore: ObservableObject {
         if didChange {
             projects = updatedProjects
         }
+    }
+
+    private func normalizedLiveProjectStates(from sessions: [LiveSession]) -> [PresetProjectState] {
+        let grouped = Dictionary(grouping: sessions, by: \.projectID)
+
+        return projects.compactMap { project in
+            guard let projectSessions = grouped[project.id], !projectSessions.isEmpty else {
+                return nil
+            }
+
+            return PresetProjectState(
+                projectID: project.id,
+                isEnabled: true,
+                launchTarget: dominantLaunchTarget(
+                    for: projectSessions.map(\.launchTarget),
+                    preferred: project.launchTarget
+                )
+            )
+        }
+    }
+
+    private func supplementedLiveProjectStates(
+        from baseStates: [PresetProjectState],
+        targetCounts: [LaunchTarget: Int]
+    ) -> [PresetProjectState] {
+        var results = baseStates
+        var mappedIDs = Set(baseStates.map(\.projectID))
+        let mappedCounts = Dictionary(baseStates.map { ($0.launchTarget, 1) }, uniquingKeysWith: +)
+
+        let recentEnabledProjects = projects
+            .filter { $0.isEnabled && !mappedIDs.contains($0.id) }
+            .sorted { lhs, rhs in
+                (lhs.lastSeenAt ?? "") > (rhs.lastSeenAt ?? "")
+            }
+
+        for target in LaunchTarget.allCases {
+            let deficit = max((targetCounts[target] ?? 0) - (mappedCounts[target] ?? 0), 0)
+            guard deficit > 0 else { continue }
+
+            let candidates = recentEnabledProjects.filter { project in
+                !mappedIDs.contains(project.id) && resolvedTarget(for: project) == target
+            }
+
+            for project in candidates.prefix(deficit) {
+                results.append(
+                    PresetProjectState(
+                        projectID: project.id,
+                        isEnabled: true,
+                        launchTarget: target
+                    )
+                )
+                mappedIDs.insert(project.id)
+            }
+        }
+
+        return results
+    }
+
+    private func dominantLaunchTarget(
+        for targets: [LaunchTarget],
+        preferred: LaunchTarget
+    ) -> LaunchTarget {
+        let counts = Dictionary(targets.map { ($0, 1) }, uniquingKeysWith: +)
+        guard let highestCount = counts.values.max() else {
+            return preferred
+        }
+
+        let candidates = counts
+            .filter { $0.value == highestCount }
+            .map(\.key)
+
+        if candidates.contains(preferred) {
+            return preferred
+        }
+
+        return LaunchTarget.allCases.first(where: candidates.contains) ?? preferred
+    }
+
+    private func syncProjectsToLiveCurrentSet(_ states: [PresetProjectState]) {
+        isRestoring = true
+        let stateByID = Dictionary(uniqueKeysWithValues: states.map { ($0.projectID, $0) })
+
+        projects = projects.map { project in
+            var updated = project
+            if let liveState = stateByID[project.id] {
+                updated.isEnabled = liveState.isEnabled
+                updated.launchTarget = liveState.launchTarget
+            } else {
+                updated.isEnabled = false
+            }
+            return updated
+        }
+
+        isRestoring = false
     }
 }
 
