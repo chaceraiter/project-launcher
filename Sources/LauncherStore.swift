@@ -1,5 +1,31 @@
 import Foundation
 import SwiftUI
+#if canImport(AppKit)
+import AppKit
+#endif
+
+enum SelectionSource: Equatable {
+    case manual
+    case live
+    case lastLaunch
+    case preset(String)
+    case autoSnapshot
+
+    var badgeText: String {
+        switch self {
+        case .manual:
+            return "Manual"
+        case .live:
+            return "Live"
+        case .lastLaunch:
+            return "Last Launch"
+        case .preset(let name):
+            return "Preset: \(name)"
+        case .autoSnapshot:
+            return "Auto Snapshot"
+        }
+    }
+}
 
 @MainActor
 final class LauncherStore: ObservableObject {
@@ -20,9 +46,17 @@ final class LauncherStore: ObservableObject {
     @Published var lastLaunchPreset: [PresetProjectState]? {
         didSet { persistState() }
     }
+    @Published var autoSnapshotAt: String? {
+        didSet { persistState() }
+    }
+    @Published var autoSnapshotPreset: [PresetProjectState]? {
+        didSet { persistState() }
+    }
     @Published private(set) var liveProjectStates: [PresetProjectState] = []
     @Published private(set) var liveWindowCount = 0
     @Published private(set) var liveTargetCounts: [LaunchTarget: Int] = [:]
+    @Published private(set) var lastLiveRefreshAt: String?
+    @Published private(set) var selectionSource: SelectionSource = .manual
     @Published var statusMessage = "Ready."
     @Published var alertMessage: String?
 
@@ -31,6 +65,8 @@ final class LauncherStore: ObservableObject {
     private let isoFormatter = ISO8601DateFormatter()
     private var isRestoring = false
     private var liveRefreshTimer: Timer?
+    private var lifecycleObservers: [NSObjectProtocol] = []
+    private let autoSnapshotInterval: TimeInterval = 15 * 60
 
     init() {
         self.stateURL = LauncherStore.makeStateURL()
@@ -44,6 +80,8 @@ final class LauncherStore: ObservableObject {
         self.presets = restoredState?.presets ?? []
         self.lastLaunchAt = restoredState?.lastLaunchAt
         self.lastLaunchPreset = restoredState?.lastLaunchPreset
+        self.autoSnapshotAt = restoredState?.autoSnapshotAt
+        self.autoSnapshotPreset = restoredState?.autoSnapshotPreset
 
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
 
@@ -51,6 +89,7 @@ final class LauncherStore: ObservableObject {
             persistState()
         }
 
+        registerLifecycleObservers()
         refreshLiveSessions()
         startLiveRefreshTimer()
     }
@@ -129,6 +168,11 @@ final class LauncherStore: ObservableObject {
         return !lastLaunchPreset.isEmpty
     }
 
+    var hasAutoSnapshotPreset: Bool {
+        guard let autoSnapshotPreset else { return false }
+        return !autoSnapshotPreset.isEmpty
+    }
+
     var lastLaunchSummary: String {
         guard let lastLaunchPreset else {
             return "No launch captured yet"
@@ -142,26 +186,57 @@ final class LauncherStore: ObservableObject {
         return "\(count) selected • \(lastLaunchDescription)"
     }
 
+    var autoSnapshotSummary: String {
+        guard let autoSnapshotPreset else {
+            return "No auto snapshot yet"
+        }
+
+        let count = autoSnapshotPreset.filter(\.isEnabled).count
+        if count == 0 {
+            return "No projects in auto snapshot"
+        }
+
+        return "\(count) selected • \(autoSnapshotDescription)"
+    }
+
+    var selectionSourceText: String {
+        selectionSource.badgeText
+    }
+
+    var liveRefreshDescription: String {
+        relativeTimeDescription(from: lastLiveRefreshAt, fallback: "never refreshed")
+    }
+
+    var autoSnapshotDescription: String {
+        relativeTimeDescription(from: autoSnapshotAt, fallback: "never snapped")
+    }
+
     func resetToStarterList() {
-        apply(states: projectStates(from: DefaultProjects.all))
+        apply(states: projectStates(from: DefaultProjects.all), source: .manual)
         statusMessage = "Applied starter list."
     }
 
     func applyCurrentSet() {
         guard !liveProjectStates.isEmpty else { return }
-        apply(states: dedupedProjectStates(liveProjectStates))
+        apply(states: dedupedProjectStates(liveProjectStates), source: .live)
         statusMessage = "Applied current set."
     }
 
     func applyLastLaunchPreset() {
         guard let lastLaunchPreset else { return }
-        apply(states: lastLaunchPreset)
+        apply(states: lastLaunchPreset, source: .lastLaunch)
         statusMessage = "Applied last launch."
     }
 
     func applyPreset(_ preset: LaunchPreset) {
-        apply(states: preset.projects)
+        apply(states: preset.projects, source: .preset(preset.name))
         statusMessage = "Applied \(preset.name)."
+    }
+
+    func applyAutoSnapshotPreset() {
+        guard let autoSnapshotPreset else { return }
+        apply(states: autoSnapshotPreset, source: .autoSnapshot)
+        statusMessage = "Applied auto snapshot."
     }
 
     func saveCurrentPreset() {
@@ -245,8 +320,18 @@ final class LauncherStore: ObservableObject {
 
         return Binding(
             get: { self.projects[index] },
-            set: { self.projects[index] = $0 }
+            set: { self.updateProject($0, at: index) }
         )
+    }
+
+    private func updateProject(_ project: LaunchProject, at index: Int) {
+        let previous = projects[index]
+        projects[index] = project
+
+        guard !isRestoring else { return }
+        if previous.isEnabled != project.isEnabled || previous.launchTarget != project.launchTarget {
+            selectionSource = .manual
+        }
     }
 
     private func currentProjectStates() -> [PresetProjectState] {
@@ -283,7 +368,7 @@ final class LauncherStore: ObservableObject {
         return result
     }
 
-    private func apply(states: [PresetProjectState]) {
+    private func apply(states: [PresetProjectState], source: SelectionSource) {
         isRestoring = true
         let stateByID = Dictionary(uniqueKeysWithValues: states.map { ($0.projectID, $0) })
         projects = projects.map { project in
@@ -298,6 +383,7 @@ final class LauncherStore: ObservableObject {
             return updated
         }
         isRestoring = false
+        selectionSource = source
         persistState()
     }
 
@@ -309,7 +395,9 @@ final class LauncherStore: ObservableObject {
             defaultLaunchTarget: defaultLaunchTarget,
             projects: projects,
             presets: presets,
-            lastLaunchPreset: lastLaunchPreset
+            lastLaunchPreset: lastLaunchPreset,
+            autoSnapshotAt: autoSnapshotAt,
+            autoSnapshotPreset: autoSnapshotPreset
         )
 
         do {
@@ -525,6 +613,7 @@ final class LauncherStore: ObservableObject {
     }
 
     private func refreshLiveSessions() {
+        let now = Date()
         let discovery = SessionDiscovery.discover(homeDirectory: NSHomeDirectory())
         mergeLiveProjectsIfNeeded(from: discovery.sessions)
         let normalizedStates = supplementedLiveProjectStates(
@@ -535,7 +624,8 @@ final class LauncherStore: ObservableObject {
         liveWindowCount = discovery.totalWindowCount
         liveTargetCounts = discovery.targetCounts
         liveProjectStates = normalizedStates
-        syncProjectsToLiveCurrentSet(normalizedStates)
+        lastLiveRefreshAt = isoFormatter.string(from: now)
+        captureAutoSnapshotIfDue(now: now)
     }
 
     private func mergeLiveProjectsIfNeeded(from sessions: [LiveSession]) {
@@ -582,6 +672,24 @@ final class LauncherStore: ObservableObject {
         if didChange {
             projects = updatedProjects
         }
+    }
+
+    private func captureAutoSnapshotIfDue(now: Date) {
+        guard !liveProjectStates.isEmpty else { return }
+
+        if let autoSnapshotAt, let previous = isoFormatter.date(from: autoSnapshotAt) {
+            if now.timeIntervalSince(previous) < autoSnapshotInterval {
+                return
+            }
+        }
+
+        captureAutoSnapshot(now: now)
+    }
+
+    private func captureAutoSnapshot(now: Date = Date()) {
+        guard !liveProjectStates.isEmpty else { return }
+        autoSnapshotPreset = dedupedProjectStates(liveProjectStates)
+        autoSnapshotAt = isoFormatter.string(from: now)
     }
 
     private func normalizedLiveProjectStates(from sessions: [LiveSession]) -> [PresetProjectState] {
@@ -660,22 +768,45 @@ final class LauncherStore: ObservableObject {
         return LaunchTarget.allCases.first(where: candidates.contains) ?? preferred
     }
 
-    private func syncProjectsToLiveCurrentSet(_ states: [PresetProjectState]) {
-        isRestoring = true
-        let stateByID = Dictionary(uniqueKeysWithValues: states.map { ($0.projectID, $0) })
-
-        projects = projects.map { project in
-            var updated = project
-            if let liveState = stateByID[project.id] {
-                updated.isEnabled = liveState.isEnabled
-                updated.launchTarget = liveState.launchTarget
-            } else {
-                updated.isEnabled = false
-            }
-            return updated
+    private func relativeTimeDescription(from isoString: String?, fallback: String) -> String {
+        guard let isoString, let date = isoFormatter.date(from: isoString) else {
+            return fallback
         }
 
-        isRestoring = false
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: date, relativeTo: Date())
+    }
+
+    private func registerLifecycleObservers() {
+#if canImport(AppKit)
+        let center = NotificationCenter.default
+
+        let resignObserver = center.addObserver(
+            forName: NSApplication.willResignActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in
+                self.captureAutoSnapshot()
+            }
+        }
+
+        let terminateObserver = center.addObserver(
+            forName: NSApplication.willTerminateNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in
+                self.captureAutoSnapshot()
+            }
+        }
+
+        lifecycleObservers.append(resignObserver)
+        lifecycleObservers.append(terminateObserver)
+#endif
     }
 }
 

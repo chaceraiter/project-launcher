@@ -166,19 +166,25 @@ struct PersistedState: Codable {
     var projects: [LaunchProject]
     var presets: [LaunchPreset]
     var lastLaunchPreset: [PresetProjectState]?
+    var autoSnapshotAt: String?
+    var autoSnapshotPreset: [PresetProjectState]?
 
     init(
         lastLaunchAt: String?,
         defaultLaunchTarget: LaunchTarget,
         projects: [LaunchProject],
         presets: [LaunchPreset],
-        lastLaunchPreset: [PresetProjectState]?
+        lastLaunchPreset: [PresetProjectState]?,
+        autoSnapshotAt: String?,
+        autoSnapshotPreset: [PresetProjectState]?
     ) {
         self.lastLaunchAt = lastLaunchAt
         self.defaultLaunchTarget = defaultLaunchTarget
         self.projects = projects
         self.presets = presets
         self.lastLaunchPreset = lastLaunchPreset
+        self.autoSnapshotAt = autoSnapshotAt
+        self.autoSnapshotPreset = autoSnapshotPreset
     }
 
     enum CodingKeys: String, CodingKey {
@@ -187,6 +193,8 @@ struct PersistedState: Codable {
         case projects
         case presets
         case lastLaunchPreset
+        case autoSnapshotAt
+        case autoSnapshotPreset
     }
 
     init(from decoder: Decoder) throws {
@@ -196,6 +204,8 @@ struct PersistedState: Codable {
         projects = try container.decodeIfPresent([LaunchProject].self, forKey: .projects) ?? DefaultProjects.all
         presets = try container.decodeIfPresent([LaunchPreset].self, forKey: .presets) ?? []
         lastLaunchPreset = try container.decodeIfPresent([PresetProjectState].self, forKey: .lastLaunchPreset)
+        autoSnapshotAt = try container.decodeIfPresent(String.self, forKey: .autoSnapshotAt)
+        autoSnapshotPreset = try container.decodeIfPresent([PresetProjectState].self, forKey: .autoSnapshotPreset)
     }
 }
 

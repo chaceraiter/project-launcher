@@ -10,6 +10,11 @@ Ideas that should shape the product beyond the current launcher workflow.
 - Allow saving the live `Current Set` directly as a named preset.
 - Distinguish between total live agent windows and the subset that can be mapped cleanly back to project folders.
 - Persist lightweight local "seen before" metadata so frequently used projects remain visible without exposing them in the public repo.
+- Prefer explicit apply over continuous overwrite:
+  - live detection should drive status and summaries
+  - toggles should update via explicit actions (`Load Current Set`, `Load Preset`, `Load Last Launch`) instead of constant auto-mutation
+- Add periodic local auto-snapshots (target: every 10–15 minutes) so unexpected restarts still have a recent recoverable set.
+- Snapshot on app lifecycle events (background/quit) when possible to improve recovery quality.
 
 ## Session Health
 
@@ -39,11 +44,24 @@ Ideas that should shape the product beyond the current launcher workflow.
 - Add a way to manually add folders outside the default `~/projects` root.
 - Keep the main list biased toward projects that have actually been opened before, not every folder on disk.
 - Treat "show all projects" as an intentional secondary action instead of the default state.
+- Include "recently opened but currently off" rows in the default list when they are likely to be useful for quick relaunch.
+- Keep auxiliary variants (for example `*-coordination`, `*-worktrees`) hidden by default unless active/referenced, or shown when `Show All` is enabled.
+
+## State Provenance UX
+
+- Clearly indicate what currently drives the UI selection:
+  - live detected set
+  - loaded preset name
+  - last launch snapshot
+  - manual edits since load
+- Show `Last Live Refresh` timestamp and a human-readable age (for example `refreshed 3m ago`).
+- If auto-snapshot is enabled, show `Last Auto Snapshot` timestamp so restart confidence is obvious.
 
 ## Recovery Workflow
 
 - Make restart recovery the primary path: open the app, inspect `Current Set` or `Last Launch`, save a preset if needed, and relaunch.
 - Support restoring multiple tools across projects with clear per-project launch targets.
+- After unexpected shutdown, prioritize recovery from the most recent valid auto-snapshot, then allow one-click promotion to a named preset.
 
 ## Future Architecture
 
@@ -57,3 +75,4 @@ Ideas that should shape the product beyond the current launcher workflow.
 - Add a simple "Add Folder" flow for projects outside `~/projects`.
 - Make preset management feel first-class: rename, reorder, duplicate, and pin favorites.
 - Decide whether multi-window-per-project should be modeled explicitly or remain a one-row-per-project simplification.
+- Implement snapshot scheduler and provenance labels before adding further detection heuristics.

@@ -105,7 +105,7 @@ struct ContentView: View {
                             .font(.system(size: 13, weight: .bold, design: .rounded))
                             .foregroundStyle(Color(hex: "#EEF3FA"))
 
-                        Text("Current Set updates live. Last Launch updates after you launch.")
+                        Text("Live refresh updates status only. Use Load to apply a set.")
                             .font(.system(size: 10, weight: .medium, design: .rounded))
                             .foregroundStyle(Color(hex: "#7F8A9A"))
                     }
@@ -134,6 +134,28 @@ struct ContentView: View {
                         actionTitle: store.hasLastLaunchPreset ? "Load" : nil,
                         action: store.hasLastLaunchPreset ? { store.applyLastLaunchPreset() } : nil
                     )
+                }
+
+                BuiltInSetCard(
+                    title: "Auto Snapshot",
+                    subtitle: store.autoSnapshotSummary,
+                    badge: store.hasAutoSnapshotPreset ? "Auto" : "Empty",
+                    actionTitle: store.hasAutoSnapshotPreset ? "Load" : nil,
+                    action: store.hasAutoSnapshotPreset ? { store.applyAutoSnapshotPreset() } : nil
+                )
+
+                PanelInset {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Selection Source")
+                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            .foregroundStyle(Color(hex: "#7F8A9A"))
+
+                        FlowLayout(spacing: 8) {
+                            StatusPill(text: store.selectionSourceText)
+                            StatusPill(text: "Live \(store.liveRefreshDescription)")
+                            StatusPill(text: "Snapshot \(store.autoSnapshotDescription)")
+                        }
+                    }
                 }
 
                 PanelInset {
@@ -310,6 +332,24 @@ private struct PresetChip: View {
             Capsule()
                 .stroke(Color.white.opacity(0.05), lineWidth: 1)
         )
+    }
+}
+
+private struct StatusPill: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 10, weight: .semibold, design: .rounded))
+            .foregroundStyle(Color(hex: "#C8D3E6"))
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(Color(hex: "#171F2C"))
+            .clipShape(Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(Color.white.opacity(0.05), lineWidth: 1)
+            )
     }
 }
 
